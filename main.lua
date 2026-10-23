@@ -1637,34 +1637,50 @@ Esp:CreateButton({
 
 
 Auto:CreateSection("Automatic Stuff")
+--loot aura :)
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local activeLoops = {}
+local selectedLootTypes = { Currency = false, KeyCards = false, Items = false }
 
--- LOOT AURA
-local lootAuraActive = false
-local lootAuraRadius = 6
-local lootAuraLoop = nil
-local lootAuraCache = {}
-local lootAuraLastScan = 0
-local function BuildLootCache()
-    lootAuraCache = {}
-    for _, room in ipairs(Rooms:GetChildren()) do
-        for _, desc in ipairs(room:GetDescendants()) do
-            if desc:IsA("Model") or desc:IsA("BasePart") then
-                local name = desc.Name
-                if IsCurrencyOrBlueprint(name) or KEYCARDS[name] then
-                    local prompt = desc:FindFirstChildWhichIsA("ProximityPrompt")
-                    if not prompt then
-                        prompt = desc:FindFirstChildWhichIsA("ClickDetector")
+-- Function to find and fire ProximityPrompts for selected loot types
+local function findAndFireProximityPrompts()
+    local character = player.Character or player.CharacterAdded:Wait()
+    if not character then return end
+
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    local roomsFolder = workspace:FindFirstChild("GameplayFolder") and workspace.GameplayFolder:FindFirstChild("Rooms")
+    if not roomsFolder then
+        warn("Rooms folder not found")
+        return
+    end
+
+    for _, room in ipairs(roomsFolder:GetChildren()) do
+        for _, object in ipairs(room:GetDescendants()) do
+            if object:IsA("ProximityPrompt") and object:FindFirstAncestor("SpawnLocations") then
+                local proxyPart = object.Parent
+                if proxyPart and proxyPart:IsA("BasePart") then
+                    local p = proxyPart.Parent
+                    local lootType = nil
+
+                    if p.Name == "NormalKeyCard" or p.Name == "PasswordPaper" or p.Name == "InnerKeyCard" or p.Name == "RidgeKeyCard" then
+                        lootType = "KeyCards"
+                    elseif p:GetAttribute("InteractionType") == "CurrencyBase" then
+                        lootType = "Currency"
+                    elseif p:GetAttribute("InteractionType") == "ItemBase" or p:GetAttribute("InteractionType") == "Ammo" then
+                        lootType = "Items"
                     end
-                    if not prompt then
-                        for _, d in ipairs(desc:GetDescendants()) do
-                            if d:IsA("ProximityPrompt") then
-                                prompt = d
-                                break
+
+                    if lootType and selectedLootTypes[lootType] then
+                        local distance = (rootPart.Position - proxyPart.Position).Magnitude
+                        if distance <= 12 then
+                            while object:IsDescendantOf(workspace) and (rootPart.Position - proxyPart.Position).Magnitude <= 12 do
+                                pcall(fireproximityprompt, object)
+                                task.wait(0.1)
                             end
                         end
-                    end
-                    if prompt then
-                        table.insert(lootAuraCache, { target = desc, prompt = prompt })
                     end
                 end
             end
@@ -1672,52 +1688,136 @@ local function BuildLootCache()
     end
 end
 
-local function CollectNearbyItems()
-    local root = GetRootPart()
-    if not root then return end
-    local now = tick()
-    if now - lootAuraLastScan > 2 then
-        BuildLootCache()
-        lootAuraLastScan = now
-    end
-    for _, entry in ipairs(lootAuraCache) do
-        if not lootAuraActive then break end
-        local prompt = entry.prompt
-        if prompt and prompt:IsDescendantOf(workspace) then
-            if prompt:IsA("ProximityPrompt") and not prompt.Enabled then
-                continue 
-            end
-            local promptPart = prompt.Parent
-            local checkPart = nil
-            if promptPart and promptPart:IsA("BasePart") then
-                checkPart = promptPart
-            elseif prompt:IsA("BasePart") then
-                checkPart = prompt
-            end
-            if checkPart then
-                local dist = (root.Position - checkPart.Position).Magnitude
-                if dist <= lootAuraRadius and dist > 0 then
-                    pcall(function()
-                        if prompt:IsA("ProximityPrompt") then
-                            local oldSight = prompt.RequiresLineOfSight
-                            local oldHold = prompt.HoldDuration
-                            if dist <= 10 then
-                                prompt.RequiresLineOfSight = false
-                            end
-                            prompt.HoldDuration = 0
-                            fireproximityprompt(prompt)
-                            task.wait()
-                            prompt.HoldDuration = oldHold
-                            prompt.RequiresLineOfSight = oldSight
-                        elseif prompt:IsA("ClickDetector") then
-                            fireclickdetector(prompt)
-                        end
-                    end)
-                end
-            end
+-- Function to start a loop
+local function startLoop(name, callback, interval)
+    if activeLoops[name] then return end
+    activeLoops[name] = true
+    activeLoops[name .. "_thread"] = task.spawn(function()
+        while activeLoops[name] do
+            callback()
+            task.wait(interval or 0.1)
+        end
+    end)
+end
+
+-- Function to stop a loop
+local function stopLoop(name)
+    if activeLoops[name] then
+        activeLoops[name] = false
+        if activeLoops[name .. "_thread"] then
+            task.cancel(activeLoops[name .. "_thread"])
+            activeLoops[name .. "_thread"] = nil
         end
     end
 end
+
+-- Function to start the loot loop
+local function startLootLoop()
+    -- Check if any loot type is selected
+    local anySelected = selectedLootTypes.Currency or selectedLootTypes.KeyCards or selectedLootTypes.Items
+
+    if anySelected then
+        startLoop("AutoLoot", findAndFireProximityPrompts, 0.1)
+        print("Auto Loot loop started")
+    else
+        print("Auto Loot not started (nothing selected)")
+    end
+end
+
+-- Toggle to enable/disable Auto Loot
+table.insert(AllToggles, Auto:CreateToggle({
+    Name = "Auto Loot",
+    Flag = "AutoLootToggle",
+    Default = false,
+    Callback = function(Value)
+        if not Value then
+            stopLoop("AutoLoot")
+            print("Auto Loot disabled by toggle")
+        else
+            startLootLoop()
+        end
+    end
+}))
+
+-- Dropdown to select what to loot
+Auto:CreateDropdown({
+    Name = "Auto Loot Aura",
+    Flag = "AutoLoot",
+    Items = {"Currency", "KeyCards", "Items"},
+    Multi = true,
+    Callback = function(Values)
+        -- Reset selected loot types
+        selectedLootTypes = { Currency = false, KeyCards = false, Items = false }
+
+        -- Debug: Print the Values table to understand its structure
+        print("Dropdown Values:", Values)
+
+        -- Set selected loot types based on Values
+        for _, item in ipairs(Values) do
+            selectedLootTypes[item] = true
+        end
+
+        print("Selected Loot Types:", selectedLootTypes)
+
+        -- Start or stop the loop based on selections and toggle state
+        if Library.Flags.AutoLootToggle then
+            stopLoop("AutoLoot")
+            startLootLoop()
+        end
+    end
+})
+
+-- Function to handle character setup and death detection
+local function setupCharacter(character)
+    local humanoid = character:WaitForChild("Humanoid", 10)
+    if humanoid then
+        humanoid.Died:Connect(function()
+            if Library.Flags.AutoLootToggle then
+                -- Turn off toggle UI safely using Library.SetFlags if available
+                if Library.SetFlags and Library.SetFlags["AutoLootToggle"] then
+                    Library.SetFlags["AutoLootToggle"](false)
+                else
+                    Library.Flags["AutoLootToggle"] = false
+                end
+                stopLoop("AutoLoot")
+                print("Auto Loot turned off due to death")
+            end
+        end)
+    end
+end
+
+-- Handle existing character on load
+if player.Character then
+    setupCharacter(player.Character)
+end
+
+-- Handle character respawns and death tracking
+player.CharacterAdded:Connect(function(character)
+    setupCharacter(character)
+    print("Character respawned")
+    -- Note: Since it turns off on death, it will remain off upon respawn until toggled again.
+end)
+
+table.insert(AllToggles, Auto:CreateToggle({
+    Name = "Force Door Open [Good for autoplays]",
+    CurrentValue = false,
+    Flag = "Door",
+    Callback = function(Value)
+        if Value then
+            loopThread = task.spawn(function()
+                while Library.Flags.Door do
+                    findAndFireProximityPrompts()
+                    task.wait(0.01)
+                end
+            end)
+        else
+            if loopThread then
+                task.cancel(loopThread)
+                loopThread = nil
+            end
+        end
+    end
+}))
 
 table.insert(AllToggles, Auto:CreateToggle({
     Name="Loot Aura (5 Studs)",
