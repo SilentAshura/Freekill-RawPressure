@@ -2592,10 +2592,10 @@ local function findPath(root, ...)
 end
 
 -- Anti Abomination
-AntiFeaturesSection:Toggle({
+Anti:CreateToggle({
     Name = "Anti Abomination",
     Flag = "AntiAbomination",
-    Default = false,
+    CurrentValue = false,
     Callback = function(Value)
         antiEnabled.Abomination = Value
         ClearAbomConns()
