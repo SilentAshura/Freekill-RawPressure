@@ -573,8 +573,9 @@ end
 end
 
 -- KEYBIND & CHARACTER CLEANUP
+local MenuKeybind = Enum.KeyCode.K
 UserInputService.InputBegan:Connect(function(input, gpe)
-    if not gpe and input.KeyCode == Enum.KeyCode.K then
+    if not gpe and input.KeyCode == MenuKeybind then
         if MainFrame.Visible then
             CloseUI()
         else
@@ -3164,6 +3165,19 @@ Settings:CreateButton({
     Name = "Unload & Destroy Script",
     Callback = function() UnloadScript() end,
 })
-
+Settings:CreateSection("Menu Keybind")
+Settings:CreateKeybind({
+    Name = "Toggle Menu Key",
+    CurrentKeybind = "K",
+    Flag = "MenuKeybindFlag",
+    Callback = function(Key)
+        if typeof(Key) == "EnumItem" then
+            MenuKeybind = Key
+        elseif typeof(Key) == "string" and Enum.KeyCode[Key] then
+            MenuKeybind = Enum.KeyCode[Key]
+        end
+        NotifyOnce("Keybind Updated", "Menu Key", "GUI toggle key changed to " .. tostring(MenuKeybind.Name), 3)
+    end
+})
 -- INITIAL LAUNCH
 OpenUI()
