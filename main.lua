@@ -1643,7 +1643,7 @@ local player = Players.LocalPlayer
 local activeLoops = {}
 local selectedLootTypes = { Currency = false, KeyCards = false, Items = false }
 
--- Function to find and fire ProximityPrompts for selected loot types
+-- 1. Specific Auto Loot (with Dropdown Filters)
 local function findAndFireProximityPrompts()
     local character = player.Character or player.CharacterAdded:Wait()
     if not character then return end
@@ -1688,7 +1688,6 @@ local function findAndFireProximityPrompts()
     end
 end
 
--- Function to start a loop
 local function startLoop(name, callback, interval)
     if activeLoops[name] then return end
     activeLoops[name] = true
@@ -1700,7 +1699,6 @@ local function startLoop(name, callback, interval)
     end)
 end
 
--- Function to stop a loop
 local function stopLoop(name)
     if activeLoops[name] then
         activeLoops[name] = false
@@ -1711,11 +1709,8 @@ local function stopLoop(name)
     end
 end
 
--- Function to start the loot loop
 local function startLootLoop()
-    -- Check if any loot type is selected
     local anySelected = selectedLootTypes.Currency or selectedLootTypes.KeyCards or selectedLootTypes.Items
-
     if anySelected then
         startLoop("AutoLoot", findAndFireProximityPrompts, 0.1)
         print("Auto Loot loop started")
@@ -1724,7 +1719,7 @@ local function startLootLoop()
     end
 end
 
--- Toggle to enable/disable Auto Loot
+-- Toggle 1: Specific Auto Loot
 table.insert(AllToggles, Auto:CreateToggle({
     Name = "Auto Loot",
     Flag = "AutoLootToggle",
@@ -1739,27 +1734,17 @@ table.insert(AllToggles, Auto:CreateToggle({
     end
 }))
 
--- Dropdown to select what to loot
+-- Dropdown for Toggle 1
 Auto:CreateDropdown({
     Name = "Auto Loot Aura",
     Flag = "AutoLoot",
     Items = {"Currency", "KeyCards", "Items"},
     Multi = true,
     Callback = function(Values)
-        -- Reset selected loot types
         selectedLootTypes = { Currency = false, KeyCards = false, Items = false }
-
-        -- Debug: Print the Values table to understand its structure
-        print("Dropdown Values:", Values)
-
-        -- Set selected loot types based on Values
         for _, item in ipairs(Values) do
             selectedLootTypes[item] = true
         end
-
-        print("Selected Loot Types:", selectedLootTypes)
-
-        -- Start or stop the loop based on selections and toggle state
         if Library.Flags.AutoLootToggle then
             stopLoop("AutoLoot")
             startLootLoop()
@@ -1767,37 +1752,72 @@ Auto:CreateDropdown({
     end
 })
 
--- Function to handle character setup and death detection
-local function setupCharacter(character)
+-- Toggle 2: General 5-Stud Loot Aura
+table.insert(AllToggles, Auto:CreateToggle({
+    Name = "Loot Aura (5 Studs)",
+    CurrentValue = false,
+    Flag = "LootAura",
+    Callback = function(Value)
+        lootAuraActive = Value
+        if Value then
+            NotifyOnce("Loot Goblin", "Loot Aura Enabled", "Collecting items strictly within 5 studs.", 5)
+            if not lootAuraLoop then
+                lootAuraLoop = RunService.Heartbeat:Connect(function()
+                    if lootAuraActive then
+                        CollectNearbyItems()
+                    end
+                end)
+            end
+        else
+            if lootAuraLoop then
+                lootAuraLoop:Disconnect()
+                lootAuraLoop = nil
+            end
+        end
+    end
+}))
+
+-- Unified Death Handlers for Unload/Death Safety
+local function setupAutoLootDeathHandler(character)
     local humanoid = character:WaitForChild("Humanoid", 10)
     if humanoid then
         humanoid.Died:Connect(function()
+            -- Turn off Toggle 1 on death
             if Library.Flags.AutoLootToggle then
-                -- Turn off toggle UI safely using Library.SetFlags if available
                 if Library.SetFlags and Library.SetFlags["AutoLootToggle"] then
                     Library.SetFlags["AutoLootToggle"](false)
                 else
                     Library.Flags["AutoLootToggle"] = false
                 end
                 stopLoop("AutoLoot")
-                print("Auto Loot turned off due to death")
+            end
+
+            -- Turn off Toggle 2 on death
+            if Library.Flags.LootAura then
+                if Library.SetFlags and Library.SetFlags["LootAura"] then
+                    Library.SetFlags["LootAura"](false)
+                else
+                    Library.Flags["LootAura"] = false
+                end
+                lootAuraActive = false
+                if lootAuraLoop then
+                    lootAuraLoop:Disconnect()
+                    lootAuraLoop = nil
+                end
             end
         end)
     end
 end
 
--- Handle existing character on load
 if player.Character then
-    setupCharacter(player.Character)
+    setupAutoLootDeathHandler(player.Character)
 end
 
--- Handle character respawns and death tracking
 player.CharacterAdded:Connect(function(character)
-    setupCharacter(character)
-    print("Character respawned")
-    -- Note: Since it turns off on death, it will remain off upon respawn until toggled again.
+    setupAutoLootDeathHandler(character)
 end)
 
+local loopThread = nil
 table.insert(AllToggles, Auto:CreateToggle({
     Name = "Force Door Open [Good for autoplays]",
     CurrentValue = false,
@@ -1818,29 +1838,6 @@ table.insert(AllToggles, Auto:CreateToggle({
         end
     end
 }))
-
-table.insert(AllToggles, Auto:CreateToggle({
-    Name="Loot Aura (5 Studs)",
-    CurrentValue=false,
-    Flag="LootAura",
-    Callback=function(Value)
-        lootAuraActive = Value
-        if Value then
-            NotifyOnce("Loot Goblin", "Loot Aura Enabled", "Collecting items strictly within 5 studs.", 5)
-            if not lootAuraLoop then
-                lootAuraLoop = RunService.Heartbeat:Connect(function()
-                    if lootAuraActive then
-                        CollectNearbyItems()
-                    end
-                end)
-            end
-        else
-            if lootAuraLoop then
-                lootAuraLoop:Disconnect()
-                lootAuraLoop = nil
-            end
-        end
-    end}))
 
 local doorPhaseActive = false
 local doorPhaseConns = {}
@@ -2402,7 +2399,7 @@ table.insert(AllToggles, Anti:CreateToggle({
         end
         skinlessConn = workspace.DescendantAdded:Connect(function(object)
             if skinlessActive then
-                task.defer(removeskinlesscorpse, object)
+                task.defer(removeSkinlessCorpse, object)
             end
         end)
     end}))   
@@ -2692,6 +2689,7 @@ local function findPath(root, ...)
 end
 
 -- Anti Abomination
+local antiEnabled = {}
 Anti:CreateToggle({
     Name = "Anti Abomination",
     Flag = "AntiAbomination",
