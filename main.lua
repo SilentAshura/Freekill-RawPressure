@@ -2059,6 +2059,60 @@ table.insert(AllToggles, Anti:CreateToggle({
     end
 }))
 
+local goodAnti, goodConns, goodRun = false, {}, 0
+
+local function DestroyGood(o)
+    if o and o.Parent and o:IsA("RemoteEvent") then
+        local p = o.Parent
+        if p.Name == "Trickster" and p.Parent and p.Parent.Name == "Interactables" then
+            pcall(function() o:Destroy() end)
+        end
+    end
+end
+
+-- Direct path scan: Rooms > room > TricksterRoom > Interactables > Trickster > RemoteEvent
+local function ScanRooms()
+    local gf = workspace:FindFirstChild("GameplayFolder")
+    local rooms = gf and gf:FindFirstChild("Rooms")
+    if not rooms then return end
+    for _, room in ipairs(rooms:GetChildren()) do
+        local tr = room:FindFirstChild("TricksterRoom")
+        local ia = tr and tr:FindFirstChild("Interactables")
+        local trickster = ia and ia:FindFirstChild("Trickster")
+        local re = trickster and trickster:FindFirstChild("RemoteEvent")
+        if re then DestroyGood(re) end
+    end
+end
+
+table.insert(AllToggles, Anti:CreateToggle({
+    Name="Anti Good People", CurrentValue=false, Flag="AntiGoodPeople",
+    Callback=function(v)
+        goodAnti=v
+        goodRun += 1                      -- invalidates any older loop
+        local myRun = goodRun
+        for _,c in ipairs(goodConns) do if typeof(c)=="RBXScriptConnection" then c:Disconnect() end end
+        table.clear(goodConns)
+        if not v then return end
+
+        -- 1) sweep everything that already exists
+        for _,o in ipairs(workspace:GetDescendants()) do DestroyGood(o) end
+        ScanRooms()
+
+        -- 2) catch anything added later, anywhere in workspace
+        table.insert(goodConns, workspace.DescendantAdded:Connect(function(o)
+            if goodAnti then DestroyGood(o) end
+        end))
+
+        -- 3) fallback loop in case the game recreates/swaps the event
+        task.spawn(function()
+            while goodAnti and goodRun == myRun do
+                ScanRooms()
+                task.wait(0.3)
+            end
+        end)
+    end
+}))
+
 local bouncerConn = nil
 table.insert(AllToggles, Anti:CreateToggle({
     Name="Remove Bouncer", CurrentValue=false, Flag="RemoveBouncer",
@@ -2132,7 +2186,57 @@ table.insert(AllToggles, Anti:CreateToggle({
 }))
 
 CreateAntiToggle(Anti, "Anti DiVine", "RemoveDiVine", function(n) return n == "DiVine" or n == "DiVineRoot" or n == "Divineroot" end)
-CreateAntiToggle(Anti, "Remove Searchlights", "RemoveSearchlights", function(n) return n == "Searchlights" end)
+local slAnti, slConns, slRun = false, {}, 0
+local slNames = {
+    MainSearchlight = true, Searchlights1 = true, Searchlights2 = true, Searchlights3 = true,
+    SearchlightsEnding1 = true, SearchlightsEnding2 = true, SearchlightsEnding3 = true
+}
+
+local function GetRooms()
+    local gf = workspace:FindFirstChild("GameplayFolder")
+    return gf and gf:FindFirstChild("Rooms")
+end
+
+local function DestroySL(o)
+    if o and o.Parent and slNames[o.Name] then
+        pcall(function() o:Destroy() end)
+    end
+end
+
+local function ScanSL()
+    local rooms = GetRooms()
+    if not rooms then return end
+    for _, o in ipairs(rooms:GetDescendants()) do DestroySL(o) end
+end
+
+table.insert(AllToggles, Anti:CreateToggle({
+    Name="Anti Searchlights", CurrentValue=false, Flag="AntiSearchlights",
+    Callback=function(v)
+        slAnti=v
+        slRun += 1
+        local myRun = slRun
+        for _,c in ipairs(slConns) do if typeof(c)=="RBXScriptConnection" then c:Disconnect() end end
+        table.clear(slConns)
+        if not v then return end
+
+        ScanSL()
+
+        -- catch anything added later inside Rooms (re-checks Rooms each time, so it survives it being replaced)
+        table.insert(slConns, workspace.DescendantAdded:Connect(function(o)
+            if not slAnti or not slNames[o.Name] then return end
+            local rooms = GetRooms()
+            if rooms and o:IsDescendantOf(rooms) then DestroySL(o) end
+        end))
+
+        -- fallback loop (same 0.5s as your original)
+        task.spawn(function()
+            while slAnti and slRun == myRun do
+                ScanSL()
+                task.wait(0.5)
+            end
+        end)
+    end
+}))
 CreateAntiToggle(Anti, "Remove Monster Locker", "RemoveMonsterLocker", function(n) return n == "MonsterLocker" end)
 
 local noGoodActive = false
@@ -2464,25 +2568,63 @@ table.insert(AllToggles, Anti:CreateToggle({
     end
 }))
 
-local abomAnti, abomConns = false, {}
+local abomConns = {}
+
 local function DestroyAbom(o)
-    if o and o.Parent and string.find(o.Name:lower(),"abom",1,true) then pcall(function() o:Destroy() end) end
+    if o and o.Parent and string.find(o.Name:lower(), "abom", 1, true) then
+        pcall(function() o:Destroy() end)
+    end
 end
 
-table.insert(AllToggles, Anti:CreateToggle({
-    Name="Remove Abomination", CurrentValue=false, Flag="RemoveAbomination",
-    Callback=function(v)
-        abomAnti=v
-        for _,c in ipairs(abomConns) do if typeof(c)=="RBXScriptConnection" then c:Disconnect() end end
-        table.clear(abomConns)
-        if not v then return end
-        for _,o in ipairs(workspace:GetDescendants()) do DestroyAbom(o) end
-        table.insert(abomConns, workspace.DescendantAdded:Connect(function(o)
-            if abomAnti then DestroyAbom(o) end
-        end))
+local function ClearAbomConns()
+    for _, c in ipairs(abomConns) do
+        if typeof(c) == "RBXScriptConnection" then c:Disconnect() end
     end
-}))
+    table.clear(abomConns)
+end
 
+-- nil-safe version of the chained FindFirstChild(..., true) calls
+local function findPath(root, ...)
+    for _, name in ipairs({...}) do
+        root = root and root:FindFirstChild(name, true)
+    end
+    return root
+end
+
+-- Anti Abomination
+AntiFeaturesSection:Toggle({
+    Name = "Anti Abomination",
+    Flag = "AntiAbomination",
+    Default = false,
+    Callback = function(Value)
+        antiEnabled.Abomination = Value
+        ClearAbomConns()
+        stopLoop("AbominationCheck")
+        if not Value then return end
+
+        -- remove anything already in the game, then anything that spawns later
+        for _, o in ipairs(workspace:GetDescendants()) do DestroyAbom(o) end
+        table.insert(abomConns, workspace.DescendantAdded:Connect(function(o)
+            if antiEnabled.Abomination then DestroyAbom(o) end
+        end))
+
+        -- ChaseEnd handling from your original (remove this block if you don't want it)
+        startLoop("AbominationCheck", function()
+            local chaseEnd = findPath(workspace, "GameplayFolder", "Rooms", "ChaseEnd")
+            if not chaseEnd then return end
+
+            local damageParts = chaseEnd:FindFirstChild("DamageParts", true)
+            if damageParts then damageParts:Destroy() end
+
+            local door = findPath(chaseEnd, "Entrances", "LargeRoundDoor")
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if door and hrp then
+                hrp.CFrame = door.CFrame
+            end
+        end, 0.5)
+    end
+})
 
 -- MOVEMENT TAB
 Move:CreateSection("Speed Modification")
