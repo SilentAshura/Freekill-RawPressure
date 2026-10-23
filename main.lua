@@ -2298,7 +2298,7 @@ table.insert(AllToggles, Anti:CreateToggle({
             end
         end
         for _, object in ipairs(workspace:GetDescendants()) do
-            removeskinlesscorpse(object)
+            removeSkinlessCorpse(object)
         end
         skinlessConn = workspace.DescendantAdded:Connect(function(object)
             if skinlessActive then
