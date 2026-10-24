@@ -2209,57 +2209,7 @@ table.insert(AllToggles, Anti:CreateToggle({
 }))
 
 CreateAntiToggle(Anti, "Anti DiVine", "RemoveDiVine", function(n) return n == "DiVine" or n == "DiVineRoot" or n == "Divineroot" end)
-local slAnti, slConns, slRun = false, {}, 0
-local slNames = {
-    MainSearchlight = true, Searchlights1 = true, Searchlights2 = true, Searchlights3 = true,
-    SearchlightsEnding1 = true, SearchlightsEnding2 = true, SearchlightsEnding3 = true
-}
-
-local function GetRooms()
-    local gf = workspace:FindFirstChild("GameplayFolder")
-    return gf and gf:FindFirstChild("Rooms")
-end
-
-local function DestroySL(o)
-    if o and o.Parent and slNames[o.Name] then
-        pcall(function() o:Destroy() end)
-    end
-end
-
-local function ScanSL()
-    local rooms = GetRooms()
-    if not rooms then return end
-    for _, o in ipairs(rooms:GetDescendants()) do DestroySL(o) end
-end
-
-table.insert(AllToggles, Anti:CreateToggle({
-    Name="Anti Searchlights", CurrentValue=false, Flag="AntiSearchlights",
-    Callback=function(v)
-        slAnti=v
-        slRun += 1
-        local myRun = slRun
-        for _,c in ipairs(slConns) do if typeof(c)=="RBXScriptConnection" then c:Disconnect() end end
-        table.clear(slConns)
-        if not v then return end
-
-        ScanSL()
-
-        -- catch anything added later inside Rooms (re-checks Rooms each time, so it survives it being replaced)
-        table.insert(slConns, workspace.DescendantAdded:Connect(function(o)
-            if not slAnti or not slNames[o.Name] then return end
-            local rooms = GetRooms()
-            if rooms and o:IsDescendantOf(rooms) then DestroySL(o) end
-        end))
-
-        -- fallback loop (same 0.5s as your original)
-        task.spawn(function()
-            while slAnti and slRun == myRun do
-                ScanSL()
-                task.wait(0.5)
-            end
-        end)
-    end
-}))
+CreateAntiToggle(Anti, "Remove Searchlights", "RemoveSearchlights", function(n) return n == "Searchlights" end)
 CreateAntiToggle(Anti, "Remove Monster Locker", "RemoveMonsterLocker", function(n) return n == "MonsterLocker" end)
 
 local noGoodActive = false
